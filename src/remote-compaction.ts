@@ -105,6 +105,66 @@ export type RemoteCompactionResult = {
   usage?: RemoteCompactionUsageSnapshot;
 };
 
+// Pi 0.80.9's CompactionResult type does not include usage. Use this
+// intersection for result objects so adding usage stays excess-property
+// compatible while newer Pi cores can read it.
+export type CompactionResultWithUsage = CompactionResult & {
+  usage?: Usage;
+};
+
+export function combineCompactionUsage(...usages: Array<Usage | undefined>): Usage | undefined {
+  let seen = false;
+  const combined: Usage = {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+
+  for (const usage of usages) {
+    if (!usage) continue;
+    seen = true;
+    combined.input += usage.input;
+    combined.output += usage.output;
+    combined.cacheRead += usage.cacheRead;
+    combined.cacheWrite += usage.cacheWrite;
+    combined.totalTokens += usage.totalTokens;
+    combined.cost.input += usage.cost.input;
+    combined.cost.output += usage.cost.output;
+    combined.cost.cacheRead += usage.cost.cacheRead;
+    combined.cost.cacheWrite += usage.cost.cacheWrite;
+    combined.cost.total += usage.cost.total;
+    if (usage.cacheWrite1h !== undefined) {
+      combined.cacheWrite1h = (combined.cacheWrite1h ?? 0) + usage.cacheWrite1h;
+    }
+    if (usage.reasoning !== undefined) {
+      combined.reasoning = (combined.reasoning ?? 0) + usage.reasoning;
+    }
+  }
+
+  return seen ? combined : undefined;
+}
+
+export function buildCompactionResultWithRemoteDetails(params: {
+  localSummary: CompactionResultWithUsage;
+  remoteDetails: RemoteCompactionDetails;
+  remoteUsage?: Usage;
+}): CompactionResultWithUsage {
+  const usage = combineCompactionUsage(params.localSummary.usage, params.remoteUsage);
+  return {
+    summary: params.localSummary.summary,
+    firstKeptEntryId: params.localSummary.firstKeptEntryId,
+    tokensBefore: params.localSummary.tokensBefore,
+    details: {
+      ...(params.localSummary.details !== undefined ? { localSummaryDetails: params.localSummary.details } : {}),
+      remoteCompaction: params.remoteDetails,
+    },
+    ...(usage ? { usage } : {}),
+  };
+}
+
 function normalizeBaseUrl(baseUrl: string | undefined, fallback: string): string {
   const trimmed = baseUrl?.trim();
   if (!trimmed) return fallback;
@@ -686,7 +746,7 @@ export async function generatePortableSummary(params: {
   signal?: AbortSignal;
   firstKeptEntryId: string;
   tokensBefore: number;
-}): Promise<CompactionResult> {
+}): Promise<CompactionResultWithUsage> {
   const conversation = serializeConversation(convertToLlm(params.messages));
   const response = await complete(
     params.model,
@@ -717,6 +777,7 @@ export async function generatePortableSummary(params: {
     summary: summary || buildCompactionSummaryText(params.model),
     firstKeptEntryId: params.firstKeptEntryId,
     tokensBefore: params.tokensBefore,
+    ...(response.usage ? { usage: response.usage } : {}),
   };
 }
 
@@ -731,7 +792,7 @@ export async function generateBestEffortLocalSummary(params: {
   thinkingLevel?: ThinkingLevel;
   firstKeptEntryId: string;
   tokensBefore: number;
-}): Promise<CompactionResult> {
+}): Promise<CompactionResultWithUsage> {
   try {
     return await generatePortableSummary(params);
   } catch {

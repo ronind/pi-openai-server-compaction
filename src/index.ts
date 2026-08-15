@@ -25,6 +25,7 @@ import {
 import { releaseAllWsSessions, releaseWsSession } from "./openai-ws-stream.ts";
 import {
   buildCompactionSummaryText,
+  buildCompactionResultWithRemoteDetails,
   buildRemoteCompactionDetails,
   buildToolsPayload,
   callRemoteCompactionEndpoint,
@@ -277,17 +278,13 @@ export default function openaiServerCompactionExtension(pi: ExtensionAPI) {
             tokensBefore: event.preparation.tokensBefore,
           };
 
-    return {
-      compaction: {
-        summary: localSummary.summary,
-        firstKeptEntryId: localSummary.firstKeptEntryId,
-        tokensBefore: localSummary.tokensBefore,
-        details: {
-          ...(localSummary.details !== undefined ? { localSummaryDetails: localSummary.details } : {}),
-          remoteCompaction: remoteDetails,
-        },
-      },
-    };
+    const compaction = buildCompactionResultWithRemoteDetails({
+      localSummary,
+      remoteDetails,
+      remoteUsage: remoteResult.value.usage,
+    });
+
+    return { compaction };
   });
 
   pi.on("message_end", (event, ctx) => {

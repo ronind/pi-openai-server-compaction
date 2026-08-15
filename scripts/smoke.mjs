@@ -96,10 +96,12 @@ assert.equal(typeof extensionFactory, "function", "extension entrypoint should e
 
 const {
   buildCodexWebSocketHeaders,
+  buildCompactionResultWithRemoteDetails,
   buildRemoteCompactionHeaders,
   buildRemoteCompactionDetails,
   buildRemoteCompactionRequestBody,
   buildRemoteCompactionV2History,
+  combineCompactionUsage,
   extractRemoteCompactionDetails,
   normalizeResponseItemsForPrompt,
   parseRemoteCompactionV2Events,
@@ -338,6 +340,94 @@ const detailsRoundTrip = extractRemoteCompactionDetails({
 assert.ok(detailsRoundTrip, "expected remote compaction details round trip");
 assert.equal(detailsRoundTrip.usage?.cacheWrite, 40);
 assert.equal(detailsRoundTrip.usage?.cost.total, 10);
+
+const localCompactionUsage = {
+  input: 1,
+  output: 2,
+  cacheRead: 3,
+  cacheWrite: 4,
+  cacheWrite1h: 1,
+  reasoning: 2,
+  totalTokens: 10,
+  cost: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, total: 10 },
+};
+const remoteCompactionUsage = {
+  input: 10,
+  output: 20,
+  cacheRead: 30,
+  cacheWrite: 40,
+  reasoning: 5,
+  totalTokens: 100,
+  cost: { input: 10, output: 20, cacheRead: 30, cacheWrite: 40, total: 100 },
+};
+const combinedCompactionUsage = {
+  input: 11,
+  output: 22,
+  cacheRead: 33,
+  cacheWrite: 44,
+  cacheWrite1h: 1,
+  reasoning: 7,
+  totalTokens: 110,
+  cost: { input: 11, output: 22, cacheRead: 33, cacheWrite: 44, total: 110 },
+};
+assert.deepEqual(combineCompactionUsage(localCompactionUsage, remoteCompactionUsage), combinedCompactionUsage);
+assert.deepEqual(combineCompactionUsage(localCompactionUsage, undefined), localCompactionUsage);
+assert.deepEqual(combineCompactionUsage(undefined, remoteCompactionUsage), remoteCompactionUsage);
+assert.equal(combineCompactionUsage(undefined, undefined), undefined);
+
+const remoteCompactionHistory = [{ type: "compaction", encrypted_content: "RESULT_ENCRYPTED" }];
+const remoteDetailsWithUsage = buildRemoteCompactionDetails(
+  {
+    provider: "openai",
+    api: "openai-responses",
+    id: "gpt-5.4-nano",
+  },
+  remoteCompactionHistory,
+  remoteCompactionUsage,
+);
+const remoteDetailsWithoutUsage = buildRemoteCompactionDetails(
+  {
+    provider: "openai",
+    api: "openai-responses",
+    id: "gpt-5.4-nano",
+  },
+  remoteCompactionHistory,
+);
+const localCompactionSummary = {
+  summary: "local summary",
+  firstKeptEntryId: "entry-1",
+  tokensBefore: 123,
+};
+
+const bothUsageCompaction = buildCompactionResultWithRemoteDetails({
+  localSummary: { ...localCompactionSummary, usage: localCompactionUsage },
+  remoteDetails: remoteDetailsWithUsage,
+  remoteUsage: remoteCompactionUsage,
+});
+assert.deepEqual(bothUsageCompaction.usage, combinedCompactionUsage);
+assert.deepEqual(bothUsageCompaction.details.remoteCompaction, remoteDetailsWithUsage);
+
+const localOnlyCompaction = buildCompactionResultWithRemoteDetails({
+  localSummary: { ...localCompactionSummary, usage: localCompactionUsage },
+  remoteDetails: remoteDetailsWithoutUsage,
+});
+assert.deepEqual(localOnlyCompaction.usage, localCompactionUsage);
+assert.deepEqual(localOnlyCompaction.details.remoteCompaction, remoteDetailsWithoutUsage);
+
+const remoteOnlyCompaction = buildCompactionResultWithRemoteDetails({
+  localSummary: localCompactionSummary,
+  remoteDetails: remoteDetailsWithUsage,
+  remoteUsage: remoteCompactionUsage,
+});
+assert.deepEqual(remoteOnlyCompaction.usage, remoteCompactionUsage);
+assert.deepEqual(remoteOnlyCompaction.details.remoteCompaction, remoteDetailsWithUsage);
+
+const neitherUsageCompaction = buildCompactionResultWithRemoteDetails({
+  localSummary: localCompactionSummary,
+  remoteDetails: remoteDetailsWithoutUsage,
+});
+assert.equal(Object.hasOwn(neitherUsageCompaction, "usage"), false);
+assert.deepEqual(neitherUsageCompaction.details.remoteCompaction, remoteDetailsWithoutUsage);
 
 const incrementalInput = selectInputItemsForContinuation({
   context: {
