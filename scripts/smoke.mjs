@@ -103,6 +103,7 @@ const {
   buildRemoteCompactionV2History,
   combineCompactionUsage,
   extractRemoteCompactionDetails,
+  messageToResponseItems,
   normalizeResponseItemsForPrompt,
   parseRemoteCompactionV2Events,
   processCompactedHistory,
@@ -111,7 +112,34 @@ const {
 } = await import(pathToFileURL(join(repoRoot, "src", "remote-compaction.ts")).href);
 const {
   selectInputItemsForContinuation,
+  buildResponseCreatePayload,
+  convertTools,
 } = await import(pathToFileURL(join(repoRoot, "src", "openai-ws-stream.ts")).href);
+const { normalizeContext, getCurrentTools } = await import("@earendil-works/pi-ai");
+const transcriptContext = normalizeContext({
+  systemPrompt: "SYSTEM_INSTRUCTIONS",
+  tools: [{ name: "read", description: "Read files", parameters: { type: "object", properties: {} } }],
+  messages: [{ role: "user", content: "Hello", timestamp: 0 }],
+});
+transcriptContext.messages.push({ role: "system", content: "UPDATED_INSTRUCTIONS" });
+const transcriptPayload = buildResponseCreatePayload({
+  model: { id: "gpt-5.4-nano", reasoning: false },
+  context: transcriptContext,
+  inputItems: [],
+  tools: convertTools(getCurrentTools(transcriptContext.messages)),
+  options: undefined,
+});
+assert.match(transcriptPayload.instructions, /SYSTEM_INSTRUCTIONS/);
+assert.match(transcriptPayload.instructions, /UPDATED_INSTRUCTIONS/);
+assert.equal(transcriptPayload.tools[0].name, "read");
+
+const deletedHeaders = buildRemoteCompactionHeaders({
+  model: { provider: "openai", api: "openai-responses" },
+  apiKey: "test-key",
+  headers: { Authorization: null, "X-Test": "present" },
+});
+assert.ok(!Object.keys(deletedHeaders).some((key) => key.toLowerCase() === "authorization"));
+assert.equal(deletedHeaders["X-Test"], "present");
 
 const targetModelKey = "openai:openai-responses:gpt-5.4-nano";
 const reconstructed = reconstructRemoteCompactionStateFromBranch({
@@ -200,6 +228,45 @@ assert.match(reconstructedJson, /KEEP_ME_TWO/);
 assert.match(reconstructedJson, /KEEP_REPLY_TWO/);
 assert.doesNotMatch(reconstructedJson, /DROP_ME/);
 assert.doesNotMatch(reconstructedJson, /DROP_REPLY/);
+
+// Pi context messages must survive replacement-history conversion.
+for (const [message, marker] of [
+  [{ role: "custom", customType: "note", content: "CUSTOM_NOTE_TEXT", display: false, timestamp: 0 }, /CUSTOM_NOTE_TEXT/],
+  [{ role: "bashExecution", command: "echo hi", output: "BASH_OUTPUT_TEXT", exitCode: 0, cancelled: false, truncated: false, timestamp: 0 }, /BASH_OUTPUT_TEXT/],
+  [{ role: "branchSummary", summary: "BRANCH_SUMMARY_TEXT", fromId: "x", timestamp: 0 }, /BRANCH_SUMMARY_TEXT/],
+  [{ role: "compactionSummary", summary: "COMPACTION_SUMMARY_TEXT", tokensBefore: 1, timestamp: 0 }, /COMPACTION_SUMMARY_TEXT/],
+]) {
+  const items = messageToResponseItems(message);
+  assert.ok(items.length > 0, `${message.role} message must not convert to zero response items`);
+  assert.equal(items[0].type, "message");
+  assert.equal(items[0].role, "user");
+  assert.match(JSON.stringify(items), marker);
+}
+assert.deepEqual(messageToResponseItems({
+  role: "bashExecution", command: "echo secret", output: "EXCLUDED_TEXT",
+  exitCode: 0, cancelled: false, truncated: false, excludeFromContext: true, timestamp: 0,
+}), []);
+
+const trailingState = reconstructRemoteCompactionStateFromBranch({
+  branchEntries: [
+    {
+      type: "compaction", id: "cmp-2",
+      details: { remoteCompaction: {
+        version: 2, provider: "openai-responses-compaction",
+        implementation: "responses_compaction_v2", modelKey: targetModelKey,
+        replacementHistory: [{ type: "compaction", encrypted_content: "ENCRYPTED" }],
+      } },
+    },
+    { type: "custom_message", id: "custom-1", customType: "supervision", content: "INJECTED_EXTENSION_NOTE", display: false },
+    { type: "branch_summary", id: "branch-1", fromId: "branch-0", summary: "PERSISTED_BRANCH_SUMMARY" },
+    { type: "message", id: "user-trailing", message: { role: "user", content: [{ type: "text", text: "UNANSWERED_USER_TURN" }] } },
+  ],
+});
+assert.ok(trailingState);
+const trailingJson = JSON.stringify(trailingState.explicitHistory);
+assert.match(trailingJson, /INJECTED_EXTENSION_NOTE/);
+assert.match(trailingJson, /PERSISTED_BRANCH_SUMMARY/);
+assert.match(trailingJson, /UNANSWERED_USER_TURN/);
 
 const requestBody = buildRemoteCompactionRequestBody({
   model: {
