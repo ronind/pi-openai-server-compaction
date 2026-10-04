@@ -3,6 +3,8 @@
 This changelog intentionally starts at **0.1.0**.
 
 ## Unreleased
+- fix extension loading on Pi 1.0.2 by avoiding pi-ai utils subpath aliases while preserving nullable, case-insensitive provider headers
+- test the real Pi extension loader in the offline smoke harness and use host-provided Pi peers
 - preserve injected context, summaries, and unanswered turns in remote history (upstream PR #18)
 - target Pi 1.0.0, including transcript-based prompts/tools and nullable provider headers
 - verify injected context and persisted usage after real compaction in the live harness

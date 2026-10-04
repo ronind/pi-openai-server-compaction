@@ -20,7 +20,6 @@ import {
   type CompactionResult,
 } from "@earendil-works/pi-coding-agent";
 import { calculateCost, type Model, type ProviderHeaders, type Usage } from "@earendil-works/pi-ai";
-import { providerHeadersToRecord } from "@earendil-works/pi-ai/utils/headers";
 import { complete } from "@earendil-works/pi-ai/compat";
 import { isRecord } from "./config.ts";
 import {
@@ -257,6 +256,19 @@ function extractCodexAccountId(token: string): string {
     throw new Error("Failed to extract accountId from Codex token");
   }
   return accountId;
+}
+
+// Pi's extension loader aliases pi-ai to a file and cannot resolve its utils subpaths.
+function providerHeadersToRecord(...sources: Array<ProviderHeaders | undefined>): Record<string, string> | undefined {
+  const merged = new Map<string, [string, string]>();
+  for (const source of sources) {
+    for (const [name, value] of Object.entries(source ?? {})) {
+      const normalizedName = name.toLowerCase();
+      merged.delete(normalizedName);
+      if (value !== null) merged.set(normalizedName, [name, value]);
+    }
+  }
+  return merged.size > 0 ? Object.fromEntries(merged.values()) : undefined;
 }
 
 function withRemoteCompactionV2Feature(headers: Record<string, string>): Record<string, string> {

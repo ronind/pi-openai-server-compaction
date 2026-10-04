@@ -91,6 +91,24 @@ for (const packageName of [
   ensureLocalPeerLink(packageName);
 }
 
+const { DefaultResourceLoader, SettingsManager } = await import("@earendil-works/pi-coding-agent");
+const loader = new DefaultResourceLoader({
+  cwd: repoRoot,
+  agentDir: repoRoot,
+  settingsManager: SettingsManager.inMemory({}),
+  noExtensions: true,
+  noSkills: true,
+  noPromptTemplates: true,
+  noThemes: true,
+  noContextFiles: true,
+  additionalExtensionPaths: [join(repoRoot, "src", "index.ts")],
+});
+await loader.reload();
+const loaded = loader.getExtensions();
+assert.deepEqual(loaded.errors, [], "extension must load through Pi's real extension loader");
+assert.equal(loaded.extensions.length, 1);
+assert.ok(loaded.extensions[0].handlers.has("session_before_compact"));
+
 const { default: extensionFactory } = await import(pathToFileURL(join(repoRoot, "src", "index.ts")).href);
 assert.equal(typeof extensionFactory, "function", "extension entrypoint should export a function");
 
@@ -140,6 +158,19 @@ const deletedHeaders = buildRemoteCompactionHeaders({
 });
 assert.ok(!Object.keys(deletedHeaders).some((key) => key.toLowerCase() === "authorization"));
 assert.equal(deletedHeaders["X-Test"], "present");
+
+const overriddenHeaders = buildRemoteCompactionHeaders({
+  model: { provider: "openai", api: "openai-responses" },
+  apiKey: "test-key",
+  sessionId: "original-session",
+  headers: { Authorization: "Bearer override", SESSION_ID: null, ACCEPT: "ignored", "X-Codex-Beta-Features": "existing" },
+});
+assert.equal(overriddenHeaders.Authorization, "Bearer override");
+assert.ok(!Object.hasOwn(overriddenHeaders, "authorization"));
+assert.ok(!Object.keys(overriddenHeaders).some((key) => key.toLowerCase() === "session_id"));
+assert.equal(overriddenHeaders.accept, "text/event-stream");
+assert.ok(!Object.hasOwn(overriddenHeaders, "ACCEPT"));
+assert.equal(overriddenHeaders["x-codex-beta-features"], "existing,remote_compaction_v2");
 
 const targetModelKey = "openai:openai-responses:gpt-5.4-nano";
 const reconstructed = reconstructRemoteCompactionStateFromBranch({
