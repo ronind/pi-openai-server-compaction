@@ -1,5 +1,19 @@
 # Validation
 
+## ChatGPT OAuth compatibility
+
+On 2026-10-04, typecheck and offline smoke tests passed on Pi 1.0.2. The
+regressions verify that ChatGPT OAuth does not patch stored-response fields,
+request remote compaction, replay API-key history, or seed API-key continuation.
+API-key request patching remains enabled.
+
+A minimal live `openai/gpt-6.1-sol` request through Sign in with ChatGPT returned
+`OK` with the updated extension. The same request with the previous pinned
+extension failed with `OpenAI WebSocket error: Unknown error (code=unknown)`.
+The full API-key/Codex remote-compaction suites were not rerun for this change;
+OAuth local compaction is covered by the offline hook regression, not a live
+compaction test.
+
 ## Current Responses compaction v2 validation
 
 On 2026-10-02, typecheck, offline smoke tests, and the full live Pi RPC suite

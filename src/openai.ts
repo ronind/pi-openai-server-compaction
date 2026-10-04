@@ -61,6 +61,10 @@ export function isDirectOpenAIResponsesModel(model: ModelLike): boolean {
   return host === undefined || host === "api.openai.com";
 }
 
+export function isChatGPTSignIn(model: ModelLike, apiKey: string | undefined): boolean {
+  return isDirectOpenAIResponsesModel(model) && apiKey !== undefined && !apiKey.startsWith("sk-");
+}
+
 export function isAzureOpenAIResponsesModel(model: ModelLike): boolean {
   if (model.api !== "azure-openai-responses" && model.api !== "openai-responses") return false;
   const provider = typeof model.provider === "string" ? model.provider : "";

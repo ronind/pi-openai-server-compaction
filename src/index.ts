@@ -4,7 +4,7 @@
  * Wires together request patching, remote compaction, runtime state
  * reconstruction, session lifecycle cleanup, and provider override registration.
  */
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { isRecord, loadConfig } from "./config.ts";
 import { streamOpenAIResponsesWithPhase2B } from "./custom-stream.ts";
@@ -14,6 +14,7 @@ import {
   extractAssistantResponseId,
   extractResponsesReasoningConfig,
   extractResponsesTextConfig,
+  isDirectOpenAIResponsesModel,
   isOpenAICodexResponsesModel,
   looksLikeResponsesPayload,
   messageMatchesModel,
@@ -65,6 +66,10 @@ type SessionContextLike = {
     getBranch(): BranchEntry[];
   };
 };
+
+function usesChatGPTSubscription(ctx: ExtensionContext): boolean {
+  return Boolean(ctx.model && isDirectOpenAIResponsesModel(ctx.model) && ctx.modelRegistry.isUsingOAuth(ctx.model));
+}
 
 function getSessionId(ctx: SessionContextLike): string {
   return ctx.sessionManager.getSessionId();
@@ -207,7 +212,7 @@ export default function openaiServerCompactionExtension(pi: ExtensionAPI) {
   pi.on("session_before_compact", async (event, ctx) => {
     const cfg = loadConfig(ctx.cwd);
     const model = ctx.model;
-    if (!cfg.enabled || !model || !supportsRemoteCompactionModel(model)) return undefined;
+    if (!cfg.enabled || !model || !supportsRemoteCompactionModel(model) || usesChatGPTSubscription(ctx)) return undefined;
 
     const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
     if (!auth.ok || !auth.apiKey) return undefined;
@@ -292,6 +297,7 @@ export default function openaiServerCompactionExtension(pi: ExtensionAPI) {
   });
 
   pi.on("message_end", (event, ctx) => {
+    if (usesChatGPTSubscription(ctx)) return;
     const sessionId = getSessionId(ctx);
     const model = ctx.model;
 
@@ -322,6 +328,10 @@ export default function openaiServerCompactionExtension(pi: ExtensionAPI) {
 
     const model = ctx.model;
     if (!model || !isRecord(event.payload) || !looksLikeResponsesPayload(event.payload)) return undefined;
+    if (usesChatGPTSubscription(ctx)) {
+      clearSessionRuntimeState(getSessionId(ctx));
+      return undefined;
+    }
 
     const sessionId = getSessionId(ctx);
     setResponsesRequestShapeState(sessionId, {

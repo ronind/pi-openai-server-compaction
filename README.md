@@ -46,7 +46,8 @@ https://x.com/alexisgallagher/status/2042396986327060736?s=20 .)
 
 | Provider/model family | Remote compaction           | `previous_response_id` continuity | Custom WS stream                 | Live-tested |
 |-----------------------|-----------------------------|-----------------------------------|----------------------------------|-------------|
-| `openai/*`            | Yes                         | Yes                               | Yes                              | Yes         |
+| `openai/*` (API key)  | Yes                         | Yes                               | Yes                              | Yes         |
+| `openai/*` (ChatGPT OAuth) | No (Pi local compaction) | No                               | No (built-in transport retained) | Basic chat  |
 | `openai-codex/*`      | Yes                         | No (built-in transport retained)  | No (built-in transport retained) | Yes         |
 | Azure                 | Partial (opt-in via config) | Partial                           | No                               | No          |
 
@@ -86,13 +87,19 @@ On compaction, the extension requests Responses compaction v2 through `/v1/respo
 - **An OpenAI-native opaque compaction artifact** for high-fidelity continuity on compatible future turns
 - **A portable Pi text summary** so non-OpenAI models, session exports, forking, and tree navigation keep working
 
-For direct `openai/*` models between compactions, the extension also:
+For direct `openai/*` models authenticated with an API key, the extension also:
 
 - Patches requests with `store: true` and `context_management`
 - Uses `previous_response_id` for live continuation when safe
 - Provides a WebSocket-backed transport path with HTTP fallback
 
 For `openai-codex/*` models, the extension preserves the built-in Codex transport and only injects reconstructed remote compaction history after compaction boundaries.
+
+For `openai/*` models authenticated through Sign in with ChatGPT, the extension
+uses Pi\'s built-in Responses transport and standard local compaction. It does
+not inject `store: true`, `context_management`, or `previous_response_id`, and
+clears cached API-key continuation and remote-history state before an OAuth
+request. Subscription requests never replay cached API-key compaction history.
 
 ## How compaction works
 
@@ -115,7 +122,7 @@ Remote compaction history is only replayed for compatible models. Cross-model tu
 
 Users should be aware:
 
-- For direct `openai/*` models, the extension sets `store: true` on requests, meaning OpenAI retains conversation data server-side
+- For direct `openai/*` models authenticated with an API key, the extension sets `store: true` on requests, meaning OpenAI retains conversation data server-side
 - Conversation context is sent to OpenAI's Responses compaction protocol
 - Returned opaque compaction artifacts are stored in Pi's local session JSONL
 - These artifacts are provider-native and not human-readable

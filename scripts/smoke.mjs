@@ -558,4 +558,94 @@ assert.deepEqual(incrementalInput, [
   },
 ]);
 
+const subscriptionHandlers = new Map();
+extensionFactory({
+  registerProvider() {},
+  on(event, handler) { subscriptionHandlers.set(event, handler); },
+});
+const { getBuiltinModel } = await import("@earendil-works/pi-ai/providers/all");
+const subscriptionModel = getBuiltinModel("openai", "gpt-5.4-nano");
+const subscriptionContext = {
+  cwd: repoRoot,
+  model: subscriptionModel,
+  hasUI: false,
+  modelRegistry: { isUsingOAuth: () => true },
+  sessionManager: { getSessionId: () => "subscription-smoke", getBranch: () => [] },
+};
+const subscriptionPayload = { model: subscriptionModel.id, input: [], store: false };
+assert.equal(
+  await subscriptionHandlers.get("before_provider_request")({ payload: subscriptionPayload }, subscriptionContext),
+  undefined,
+  "ChatGPT OAuth must not add stored-response or remote-compaction fields",
+);
+assert.equal(
+  await subscriptionHandlers.get("session_before_compact")({}, subscriptionContext),
+  undefined,
+  "ChatGPT OAuth must use Pi's standard local compaction",
+);
+const apiPayload = await subscriptionHandlers.get("before_provider_request")(
+  { payload: subscriptionPayload },
+  { ...subscriptionContext, modelRegistry: { isUsingOAuth: () => false } },
+);
+assert.equal(apiPayload.store, true, "API-key requests must retain server-side continuation");
+assert.ok(apiPayload.context_management, "API-key requests must retain remote compaction");
+
+const {
+  getContinuationState,
+  getRemoteCompactionState,
+  getResponsesRequestShapeState,
+  setContinuationState,
+  setRemoteCompactionState,
+  setResponsesRequestShapeState,
+} = await import(pathToFileURL(join(repoRoot, "src", "state.ts")).href);
+const subscriptionSessionId = "subscription-smoke";
+setContinuationState(subscriptionSessionId, {
+  responseId: "api-response-before-login",
+  modelKey: "openai:openai-responses:gpt-5.4-nano",
+  updatedAt: Date.now(),
+});
+setRemoteCompactionState(subscriptionSessionId, {
+  modelKey: "openai:openai-responses:gpt-5.4-nano",
+  explicitHistory: [{ role: "user", content: "OLD_API_HISTORY" }],
+});
+setResponsesRequestShapeState(subscriptionSessionId, { updatedAt: Date.now() });
+await subscriptionHandlers.get("before_provider_request")({ payload: subscriptionPayload }, subscriptionContext);
+assert.equal(getContinuationState(subscriptionSessionId), undefined);
+assert.equal(getRemoteCompactionState(subscriptionSessionId), undefined);
+assert.equal(getResponsesRequestShapeState(subscriptionSessionId), undefined);
+await subscriptionHandlers.get("message_end")({
+  message: {
+    role: "assistant", provider: "openai", model: subscriptionModel.id,
+    responseId: "subscription-response", content: [], stopReason: "stop",
+  },
+}, subscriptionContext);
+assert.equal(getContinuationState(subscriptionSessionId), undefined, "OAuth responses must not seed API-key continuation");
+
+const { streamOpenAIResponsesWithPhase2B } = await import(pathToFileURL(join(repoRoot, "src", "custom-stream.ts")).href);
+let subscriptionStreamPayload;
+setRemoteCompactionState(subscriptionSessionId, {
+  modelKey: "openai:openai-responses:gpt-5.4-nano",
+  explicitHistory: [{ role: "user", content: "OLD_API_HISTORY" }],
+});
+const subscriptionStream = streamOpenAIResponsesWithPhase2B(
+  subscriptionModel,
+  normalizeContext({ messages: [{ role: "user", content: "FRESH_SUBSCRIPTION_HISTORY", timestamp: 0 }] }),
+  {
+    apiKey: "test-chatgpt-access-token",
+    sessionId: subscriptionSessionId,
+    transport: "sse",
+    maxTokens: 16,
+    onPayload(payload) {
+      subscriptionStreamPayload = payload;
+      throw new Error("STOP_BEFORE_NETWORK");
+    },
+  },
+);
+await subscriptionStream.result();
+assert.equal(subscriptionStreamPayload.store, false);
+assert.equal(subscriptionStreamPayload.max_output_tokens, undefined);
+assert.match(JSON.stringify(subscriptionStreamPayload.input), /FRESH_SUBSCRIPTION_HISTORY/);
+assert.doesNotMatch(JSON.stringify(subscriptionStreamPayload.input), /OLD_API_HISTORY/);
+await subscriptionHandlers.get("session_shutdown")({}, subscriptionContext);
+
 console.log("smoke ok");
