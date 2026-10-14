@@ -50,16 +50,16 @@
   "scripts": {
     "smoke": "node --experimental-strip-types ./scripts/smoke.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "npm run typecheck && npm run smoke",
+    "test": "tsc --noEmit && node --experimental-strip-types ./scripts/smoke.mjs && node --test ./tests/*.test.mjs",
     "test:live": "node --experimental-strip-types ./tests/live/openai-compaction-rpc-live.ts"
   },
   "dependencies": {
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "1.0.2",
-    "@earendil-works/pi-ai": "1.0.2",
-    "@earendil-works/pi-coding-agent": "1.0.2",
+    "@earendil-works/pi-agent-core": "1.2.0",
+    "@earendil-works/pi-ai": "1.2.0",
+    "@earendil-works/pi-coding-agent": "1.2.0",
     "@types/node": "^24.10.0",
     "@types/ws": "^8.18.1",
     "typescript": "^5.9.3"

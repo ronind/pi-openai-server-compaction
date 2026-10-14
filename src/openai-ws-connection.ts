@@ -176,6 +176,7 @@ export class OpenAIWebSocketManager extends EventEmitter {
   private retryTimer: NodeJS.Timeout | null = null;
   private closed = false;
   private _previousResponseId: string | null = null;
+  private _responseInfo: { status: number; headers: Record<string, string> } | undefined;
   private readonly wsUrl: string;
   private readonly maxRetries: number;
   private readonly backoffDelaysMs: readonly number[];
@@ -191,6 +192,10 @@ export class OpenAIWebSocketManager extends EventEmitter {
 
   get previousResponseId(): string | null {
     return this._previousResponseId;
+  }
+
+  get responseInfo(): { status: number; headers: Record<string, string> } | undefined {
+    return this._responseInfo;
   }
 
   async connect(apiKey: string): Promise<void> {
@@ -233,6 +238,7 @@ export class OpenAIWebSocketManager extends EventEmitter {
       // ignore
     }
     this.ws = null;
+    this._responseInfo = undefined;
   }
 
   warmUp(params: { model: string; tools?: FunctionToolDefinition[]; instructions?: string }): void {
@@ -270,6 +276,14 @@ export class OpenAIWebSocketManager extends EventEmitter {
       }
 
       this.ws = socket;
+      this._responseInfo = undefined;
+      socket.once?.("upgrade", (response: { statusCode?: number; headers: Record<string, string | string[] | undefined> }) => {
+        const headers: Record<string, string> = {};
+        for (const [name, value] of Object.entries(response.headers)) {
+          if (value !== undefined) headers[name] = Array.isArray(value) ? value.join(", ") : value;
+        }
+        this._responseInfo = { status: response.statusCode ?? 101, headers };
+      });
       let settled = false;
 
       const cleanup = () => {

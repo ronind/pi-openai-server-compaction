@@ -3,6 +3,8 @@
 This changelog intentionally starts at **0.1.0**.
 
 ## Unreleased
+- target Pi 1.2.0 and verify WebSocket response/provider-event hooks with offline tests
+- await provider observers in wire order and stop queued event delivery after cancellation or observer failure
 - fix extension loading on Pi 1.0.2 by avoiding pi-ai utils subpath aliases while preserving nullable, case-insensitive provider headers
 - test the real Pi extension loader in the offline smoke harness and use host-provided Pi peers
 - preserve injected context, summaries, and unanswered turns in remote history (upstream PR #18)

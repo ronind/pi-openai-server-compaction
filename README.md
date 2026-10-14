@@ -75,7 +75,7 @@ pi -e ./src/index.ts --model openai/gpt-5.6-luna
 ## Requirements
 
 - Node `>=22.19.0`
-- Pi `1.0.2` (tested target)
+- Pi `1.2.0` (tested target)
 - Auth/config for the model you want to use must already work in Pi
 - A supported OpenAI Responses model, e.g. `openai/gpt-5.6-sol` or `openai-codex/gpt-5.6-sol`
 
@@ -161,11 +161,16 @@ If something goes wrong:
 
 ## Testing
 
-Smoke test (offline, verifies Pi's extension loader, imports, and key algorithms):
+Offline tests (typecheck, real Pi extension loader, compaction algorithms, and
+WebSocket request/response observation):
 
 ```bash
-npm run smoke
+pnpm test
 ```
+
+The custom WebSocket stream forwards response and provider-event hooks. Response
+observers receive the HTTP upgrade status and headers, including on reused
+connections; these are handshake headers, not fresh per-turn quota headers.
 
 Live end-to-end test (requires working Pi + OpenAI auth):
 
@@ -184,7 +189,7 @@ PI_OPENAI_SERVER_COMPACTION_TEST_MODEL=openai-codex/gpt-5.6-sol npm run test:liv
 - Pi's local JSONL/tree model remains authoritative
 - Opaque remote compaction artifacts are only reused for compatible OpenAI Responses turns
 - Switching to a different provider/model falls back to Pi's text-summary portability path
-- Pi 1.0.2 persists and aggregates successful local and remote compaction usage
+- Pi 1.2.0 persists and aggregates successful local and remote compaction usage
   in session stats. Remote usage is also retained in `details.remoteCompaction.usage`.
 - This fork includes the context-preservation fix from upstream PR #18 and the
   usage-reporting fix from PR #15. Older Pi versions are no longer the tested target.

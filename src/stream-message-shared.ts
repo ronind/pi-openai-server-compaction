@@ -85,16 +85,17 @@ export function buildAssistantMessageWithZeroUsage(params: {
 export function buildStreamErrorAssistantMessage(params: {
   model: StreamModelDescriptor;
   errorMessage: string;
+  stopReason: "error" | "aborted";
   timestamp?: number;
-}): AssistantMessage & { stopReason: "error"; errorMessage: string } {
+}): AssistantMessage & { stopReason: "error" | "aborted"; errorMessage: string } {
   return {
     ...buildAssistantMessageWithZeroUsage({
       model: params.model,
       content: [],
-      stopReason: "error",
+      stopReason: params.stopReason,
       timestamp: params.timestamp,
     }),
-    stopReason: "error",
+    stopReason: params.stopReason,
     errorMessage: params.errorMessage,
   };
 }

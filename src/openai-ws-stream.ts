@@ -843,6 +843,10 @@ export function createOpenAIWebSocketStreamFn(
           return await fallbackToHttpResponses(model, context, options, eventStream);
         }
 
+        if (session.manager.responseInfo) {
+          await options?.onResponse?.(session.manager.responseInfo, model);
+        }
+
         const signal = options?.signal;
         if (resolveWsWarmup(options) && !session.warmUpAttempted) {
           session.warmUpAttempted = true;
@@ -921,6 +925,8 @@ export function createOpenAIWebSocketStreamFn(
         const capturedContextLength = context.messages.length;
         let textStarted = false;
         await new Promise<void>((resolve, reject) => {
+          let finished = false;
+          let pendingEvents = Promise.resolve();
           const abortHandler = () => {
             cleanup();
             reject(new Error("aborted"));
@@ -932,18 +938,26 @@ export function createOpenAIWebSocketStreamFn(
           signal?.addEventListener("abort", abortHandler, { once: true });
 
           const closeHandler = (code: number, reason: string) => {
-            cleanup();
-            reject(new Error(`WebSocket closed mid-request (code=${code}, reason=${reason || "unknown"})`));
+            pendingEvents = pendingEvents.then(() => {
+              if (finished) return;
+              cleanup();
+              reject(new Error(`WebSocket closed mid-request (code=${code}, reason=${reason || "unknown"})`));
+            });
           };
           session.manager.on("close", closeHandler);
 
           const cleanup = () => {
+            if (finished) return;
+            finished = true;
             signal?.removeEventListener("abort", abortHandler);
             session.manager.off("close", closeHandler);
             unsubscribe();
           };
 
-          const unsubscribe = session.manager.onMessage((event: OpenAIWebSocketEvent) => {
+          const processEvent = async (event: OpenAIWebSocketEvent) => {
+            if (finished) return;
+            await options?.onProviderStreamEvent?.(event, model);
+            if (finished) return;
             if (event.type === "response.completed") {
               const response = responseFromEvent(event);
               if (!response) {
@@ -1006,6 +1020,12 @@ export function createOpenAIWebSocketStreamFn(
                 partial: partialMsg,
               });
             }
+          };
+          const unsubscribe = session.manager.onMessage((event: OpenAIWebSocketEvent) => {
+            pendingEvents = pendingEvents.then(() => processEvent(event)).catch((error) => {
+              cleanup();
+              reject(error);
+            });
           });
         });
       };
@@ -1014,12 +1034,14 @@ export function createOpenAIWebSocketStreamFn(
         const errorMessage = error instanceof Error ? error.message : String(error);
         const sessionId = options?.sessionId;
         if (sessionId) releaseWsSession(sessionId);
+        const reason = options?.signal?.aborted ? "aborted" : "error";
         eventStream.push({
           type: "error",
-          reason: options?.signal?.aborted ? "aborted" : "error",
+          reason,
           error: buildStreamErrorAssistantMessage({
             model: getModelDescriptor(model),
             errorMessage,
+            stopReason: reason,
           }),
         });
         eventStream.end();
